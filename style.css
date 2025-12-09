@@ -19,6 +19,14 @@
     width: 15rem;
 }
 
+/* Fix Active State Contrast */
+#sidebar-wrapper .list-group-item.active {
+    background-color: #0d6efd !important;
+    /* Bootstrap Primary */
+    color: #fff !important;
+    border-color: #0d6efd !important;
+}
+
 #page-content-wrapper {
     min-width: 100vw;
 }
