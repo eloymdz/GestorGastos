@@ -1,19 +1,30 @@
 /**
- * Expense Tracker - Responsive & Status Edition
+ * Expense Tracker - Serverless Edition (Supabase)
  */
 
-// --- State ---
-const DEFAULT_STATE = { people: [], groups: [] };
-let AppState = JSON.parse(localStorage.getItem('expenseTrackerState')) || DEFAULT_STATE;
+// --- Supabase Config ---
+const SUPABASE_URL = 'https://qcgabxqoqxtdrvugqalr.supabase.co';
+const SUPABASE_KEY = 'sb_publishable__OQcd-N-fk5WSAM6eGdxfw_9UB-DPvG'; // Public Anon Key
+const { createClient } = window.supabase;
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// --- Local Cache State (for UI rendering) ---
+// We keep a local copy to avoid refactoring the entire UI logic, 
+// but we refresh it from DB constantly.
+let AppState = { people: [], groups: [] };
 let currentGroupId = null;
 
 // --- DataTables Instances ---
 let tables = {};
 
 // --- Initialization ---
-$(document).ready(function () {
-    migrateData();
+$(document).ready(async function () {
     initLayout();
+    try {
+        await refreshData(); // Initial Fetch
+    } catch (e) {
+        console.error(e);
+    }
     showView('dashboard');
 });
 
@@ -24,42 +35,75 @@ function initLayout() {
     });
 }
 
-function migrateData() {
-    let dirty = false;
-    if (!AppState.people) { AppState.people = []; dirty = true; }
-    if (!AppState.groups) { AppState.groups = []; dirty = true; }
+// --- Data Synchronization (The Core) ---
+async function refreshData() {
+    try {
+        // 1. Fetch People
+        const { data: people, error: errP } = await supabase.from('people').select('*');
+        if (errP) throw errP;
+        AppState.people = people || [];
 
-    AppState.groups.forEach(g => {
-        // v4 migration: embedded people
-        if (g.people && g.people.length > 0) {
-            if (!g.memberIds) g.memberIds = [];
-            g.people.forEach(lx => {
-                let gp = AppState.people.find(x => x.id === lx.id || x.name === lx.name);
-                if (!gp) {
-                    gp = { id: lx.id || Date.now().toString(), name: lx.name };
-                    AppState.people.push(gp);
-                }
-                if (!g.memberIds.includes(gp.id)) g.memberIds.push(gp.id);
-            });
-            delete g.people;
-            dirty = true;
-        }
+        // 2. Fetch Groups
+        const { data: groups, error: errG } = await supabase.from('groups').select('*');
+        if (errG) throw errG;
 
-        // v6 migration: status and timestamps
-        if (!g.status) { g.status = 'PENDING'; dirty = true; }
-        if (!g.createdAt) { g.createdAt = Date.now(); dirty = true; } // Backfill with now for old groups
-        if (!g.paidAt) { g.paidAt = null; dirty = true; }
-    });
+        // 3. For the simplified UI logic we have, we need to nest expenses and members.
+        // In a real large app, we would load strictly on demand. For now, we mimic the old structure slightly
+        // or trigger on-demand loading when opening a group. 
+        // Let's load mainly the list first.
 
-    if (dirty) saveState();
+        AppState.groups = groups.map(g => ({
+            ...g,
+            memberIds: [], // placeholder, loaded on detail
+            expenses: []   // placeholder, loaded on detail
+        }));
+
+    } catch (error) {
+        console.error("Error fetching data:", error);
+        alert("Error de BD: " + (error.message || error.error_description || JSON.stringify(error)));
+    }
 }
 
-function saveState() {
-    localStorage.setItem('expenseTrackerState', JSON.stringify(AppState));
+async function fetchGroupDetails(groupId) {
+    // Load Members
+    const { data: members, error: errM } = await supabase
+        .from('group_members')
+        .select('person_id')
+        .eq('group_id', groupId);
+
+    if (errM) console.error(errM);
+
+    // Load Expenses
+    const { data: expenses, error: errE } = await supabase
+        .from('expenses')
+        .select(`
+            *,
+            expense_involved (person_id)
+        `)
+        .eq('group_id', groupId);
+
+    if (errE) console.error(errE);
+
+    // Map to AppState structure
+    const group = AppState.groups.find(g => g.id == groupId); // Loose query (string/int)
+    if (group) {
+        group.memberIds = (members || []).map(m => m.person_id);
+
+        group.expenses = (expenses || []).map(e => ({
+            id: e.id,
+            desc: e.description,
+            amount: parseFloat(e.amount),
+            payerId: e.payer_id,
+            type: e.type,
+            borrowerId: e.borrower_id,
+            involvedIds: (e.expense_involved || []).map(i => i.person_id),
+            date: e.created_at
+        }));
+    }
 }
 
 // --- View Navigation ---
-function showView(viewName) {
+async function showView(viewName) {
     $('.list-group-item').removeClass('active');
     $(`#nav-${viewName}`).addClass('active');
 
@@ -67,12 +111,15 @@ function showView(viewName) {
 
     if (viewName === 'dashboard') {
         $('#view-dashboard').removeClass('d-none');
+        await refreshData();
         renderDashboard();
     } else if (viewName === 'groups') {
         $('#view-groups').removeClass('d-none');
+        await refreshData();
         renderGroupsTable();
     } else if (viewName === 'people') {
         $('#view-people').removeClass('d-none');
+        await refreshData();
         renderPeopleTable();
     }
 }
@@ -80,16 +127,14 @@ function showView(viewName) {
 // --- Helper for DataTable ---
 function initTable(id, data, columns, createdRowCallback = null) {
     if ($.fn.DataTable.isDataTable('#' + id)) {
-        $('#' + id).DataTable().destroy(); // destroy old instance
+        $('#' + id).DataTable().destroy();
     }
 
     tables[id] = $('#' + id).DataTable({
         data: data,
         columns: columns,
-        responsive: true, // Enable Responsive
-        language: {
-            url: "//cdn.datatables.net/plug-ins/1.13.4/i18n/es-ES.json"
-        },
+        responsive: true,
+        language: { url: "//cdn.datatables.net/plug-ins/1.13.4/i18n/es-ES.json" },
         createdRow: createdRowCallback
     });
 }
@@ -100,12 +145,15 @@ function renderDashboard() {
     $('#dash-total-groups').text(active);
     $('#dash-total-people').text(AppState.people.length);
 
-    // Recent groups (PENDING only or all? Let's show all but sort pending first)
-    const data = AppState.groups.slice().sort((a, b) => b.createdAt - a.createdAt).slice(0, 5).map(g => ({
-        name: g.name,
-        status: g.status,
-        id: g.id
-    }));
+    // Sort by created_at desc
+    const data = AppState.groups.slice()
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+        .slice(0, 5)
+        .map(g => ({
+            name: g.name,
+            status: g.status,
+            id: g.id
+        }));
 
     initTable('dashGroupsTable', data, [
         { data: 'name' },
@@ -120,7 +168,7 @@ function renderDashboard() {
         {
             data: 'id',
             render: function (data) {
-                return `<button class="btn btn-sm btn-primary" onclick="openGroupDetail('${data}')">Ver</button>`;
+                return `<button class="btn btn-sm btn-primary" onclick="openGroupDetail(${data})">Ver</button>`;
             }
         }
     ]);
@@ -128,19 +176,21 @@ function renderDashboard() {
 
 // --- Groups List ---
 function renderGroupsTable() {
+    // Note: Totals are inaccurate here because we didn't fetch deep expenses. 
+    // For cloud apps, usually lists don't show heavy calculated totals unless indexed.
+    // We will show '...' or 0 for now to keep it fast, or remove the column.
+
     const data = AppState.groups.map(g => {
-        const total = (g.expenses || []).reduce((acc, c) => acc + parseFloat(c.amount), 0);
-        let dateStr = new Date(g.createdAt).toLocaleDateString();
-        if (g.status === 'PAID' && g.paidAt) {
-            dateStr = 'Pagado: ' + new Date(g.paidAt).toLocaleDateString();
+        let dateStr = new Date(g.created_at).toLocaleDateString();
+        if (g.status === 'PAID' && g.paid_at) {
+            dateStr = 'Pagado: ' + new Date(g.paid_at).toLocaleDateString();
         }
 
         return {
             name: g.name,
             status: g.status,
             date: dateStr,
-            total: total,
-            totalStr: '$' + total.toLocaleString('es-MX', { minimumFractionDigits: 2 }),
+            totalStr: '--', // Calculation requires fetching all expenses, omitted for list performance
             id: g.id
         };
     });
@@ -156,7 +206,7 @@ function renderGroupsTable() {
             }
         },
         { data: 'date' },
-        { data: 'totalStr', orderData: [3] },
+        { data: 'totalStr' },
         {
             data: 'id',
             render: function (id, type, row) {
@@ -165,29 +215,26 @@ function renderGroupsTable() {
                 const toggleClass = row.status === 'PENDING' ? 'btn-outline-success' : 'btn-outline-warning';
 
                 return `
-                    <button class="btn btn-primary btn-sm me-1" onclick="openGroupDetail('${id}')"><i class="fas fa-eye"></i></button>
-                    <button class="btn ${toggleClass} btn-sm me-1" title="${toggleTitle}" onclick="toggleGroupStatus('${id}')"><i class="fas ${toggleIcon}"></i></button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteGroup('${id}')"><i class="fas fa-trash"></i></button>
+                    <button class="btn btn-primary btn-sm me-1" onclick="openGroupDetail(${id})"><i class="fas fa-eye"></i></button>
+                    <button class="btn ${toggleClass} btn-sm me-1" title="${toggleTitle}" onclick="toggleGroupStatus(${id}, '${row.status}')"><i class="fas ${toggleIcon}"></i></button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteGroup(${id})"><i class="fas fa-trash"></i></button>
                 `;
             }
         }
     ]);
 }
 
-function toggleGroupStatus(id) {
-    const g = AppState.groups.find(x => x.id === id);
-    if (g) {
-        if (g.status === 'PENDING') {
-            if (confirm('¿Marcar grupo como PAGADO?')) {
-                g.status = 'PAID';
-                g.paidAt = Date.now();
-            }
-        } else {
-            g.status = 'PENDING';
-            g.paidAt = null;
-        }
-        saveState();
-        renderGroupsTable();
+async function toggleGroupStatus(id, currentStatus) {
+    const newStatus = currentStatus === 'PENDING' ? 'PAID' : 'PENDING';
+    const paidAt = newStatus === 'PAID' ? new Date().toISOString() : null;
+
+    if (confirm(`¿Cambiar estado a ${newStatus}?`)) {
+        const { error } = await supabase.from('groups')
+            .update({ status: newStatus, paid_at: paidAt })
+            .eq('id', id);
+
+        if (error) alert('Error actualizando estado');
+        else showView('groups');
     }
 }
 
@@ -196,29 +243,23 @@ function openCreateGroupModal() {
     new bootstrap.Modal(document.getElementById('createGroupModal')).show();
 }
 
-function createGroup() {
+async function createGroup() {
     const name = $('#newGroupName').val().trim();
     if (name) {
-        AppState.groups.push({
-            id: Date.now().toString(),
-            name,
-            memberIds: [],
-            expenses: [],
-            status: 'PENDING',
-            createdAt: Date.now(),
-            paidAt: null
-        });
-        saveState();
-        bootstrap.Modal.getInstance(document.getElementById('createGroupModal')).hide();
-        renderGroupsTable();
+        const { error } = await supabase.from('groups').insert([{ name }]);
+        if (error) alert('Error creando grupo');
+        else {
+            bootstrap.Modal.getInstance(document.getElementById('createGroupModal')).hide();
+            showView('groups');
+        }
     }
 }
 
-function deleteGroup(id) {
+async function deleteGroup(id) {
     if (confirm('¿Eliminar grupo permanentemente?')) {
-        AppState.groups = AppState.groups.filter(g => g.id !== id);
-        saveState();
-        renderGroupsTable();
+        const { error } = await supabase.from('groups').delete().eq('id', id);
+        if (error) alert('Error eliminando grupo');
+        else showView('groups');
     }
 }
 
@@ -234,44 +275,48 @@ function renderPeopleTable() {
         {
             data: 'id',
             render: function (id) {
-                return `<button class="btn btn-danger btn-sm" onclick="deleteGlobalPerson('${id}')"><i class="fas fa-trash"></i></button>`;
+                return `<button class="btn btn-danger btn-sm" onclick="deleteGlobalPerson(${id})"><i class="fas fa-trash"></i></button>`;
             }
         }
     ]);
 }
 
-function addGlobalPerson() {
+async function addGlobalPerson() {
     const name = $('#globalPersonName').val().trim();
     if (name) {
-        AppState.people.push({ id: Date.now().toString(), name });
-        saveState();
-        $('#globalPersonName').val('');
-        renderPeopleTable();
-        alert('Persona agregada');
+        const { error } = await supabase.from('people').insert([{ name }]);
+        if (error) alert('Error agregando persona: ' + error.message);
+        else {
+            $('#globalPersonName').val('');
+            showView('people'); // Refresh
+            alert('Persona agregada');
+        }
     }
 }
 
-function deleteGlobalPerson(id) {
+async function deleteGlobalPerson(id) {
     if (confirm('¿Eliminar del directorio global?')) {
-        AppState.people = AppState.people.filter(p => p.id !== id);
-        saveState();
-        renderPeopleTable();
+        const { error } = await supabase.from('people').delete().eq('id', id);
+        if (error) alert('Error: Puede que esté en un grupo. Elimínala de los grupos primero.');
+        else showView('people');
     }
 }
 
 // --- Group Detail ---
-function openGroupDetail(id) {
+async function openGroupDetail(id) {
     currentGroupId = id;
-    const group = AppState.groups.find(g => g.id === id);
+
+    // Switch view first for feedback
+    $('#view-dashboard, #view-groups, #view-people, #view-group-detail').addClass('d-none');
+    $('#view-group-detail').removeClass('d-none');
+
+    // Fetch deep data
+    await fetchGroupDetails(id);
+    const group = AppState.groups.find(g => g.id == id);
     if (!group) return;
 
     $('#detailGroupName').text(group.name + (group.status === 'PAID' ? ' (Pagado)' : ''));
 
-    // Switch view
-    $('#view-dashboard, #view-groups, #view-people, #view-group-detail').addClass('d-none');
-    $('#view-group-detail').removeClass('d-none');
-
-    // Set active tab to Expenses
     var firstTabEl = document.querySelector('#view-group-detail .nav-link[href="#tab-expenses"]')
     var firstTab = new bootstrap.Tab(firstTabEl)
     firstTab.show()
@@ -283,17 +328,17 @@ function openGroupDetail(id) {
 
 // 1. Members
 function renderGroupMembers() {
-    const group = AppState.groups.find(g => g.id === currentGroupId);
+    const group = AppState.groups.find(g => g.id == currentGroupId);
     const list = $('#groupMembersList');
     list.empty();
 
     (group.memberIds || []).forEach(mid => {
-        const p = AppState.people.find(x => x.id === mid);
+        const p = AppState.people.find(x => x.id == mid);
         if (p) {
             list.append(`
                 <li class="list-group-item d-flex justify-content-between align-items-center">
                     ${p.name}
-                    <button class="btn btn-sm btn-outline-danger" onclick="removeMember('${mid}')"><i class="fas fa-times"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="removeMember(${mid})"><i class="fas fa-times"></i></button>
                 </li>
             `);
         }
@@ -308,30 +353,36 @@ function renderGroupMembers() {
     });
 }
 
-function addMemberToGroup() {
+async function addMemberToGroup() {
     const pid = $('#selectPersonToAdd').val();
     if (!pid) return;
-    const group = AppState.groups.find(g => g.id === currentGroupId);
-    if (!group.memberIds) group.memberIds = [];
-    group.memberIds.push(pid);
-    saveState();
-    renderGroupMembers();
+
+    const { error } = await supabase
+        .from('group_members')
+        .insert([{ group_id: currentGroupId, person_id: pid }]);
+
+    if (error) alert('Error añadiendo miembro');
+    else await openGroupDetail(currentGroupId);
 }
 
-function removeMember(mid) {
+async function removeMember(mid) {
     if (confirm('¿Quitar del grupo?')) {
-        const group = AppState.groups.find(g => g.id === currentGroupId);
-        group.memberIds = group.memberIds.filter(id => id !== mid);
-        saveState();
-        renderGroupMembers();
+        const { error } = await supabase
+            .from('group_members')
+            .delete()
+            .eq('group_id', currentGroupId)
+            .eq('person_id', mid);
+
+        if (error) alert('Error quitando miembro');
+        else await openGroupDetail(currentGroupId);
     }
 }
 
 // 2. Expenses
 function renderGroupExpenses() {
-    const group = AppState.groups.find(g => g.id === currentGroupId);
+    const group = AppState.groups.find(g => g.id == currentGroupId);
     const data = (group.expenses || []).map(e => {
-        const p = AppState.people.find(x => x.id === e.payerId);
+        const p = AppState.people.find(x => x.id == e.payerId);
         const payerName = p ? p.name : 'Unknown';
         const typeBadge = e.type === 'SHARED' ? '<span class="badge bg-success">Gasto</span>' : '<span class="badge bg-warning text-dark">Préstamo</span>';
 
@@ -354,15 +405,19 @@ function renderGroupExpenses() {
         {
             data: 'id',
             render: function (id) {
-                return `<button class="btn btn-info btn-sm text-white" onclick="openEditExpense('${id}')"><i class="fas fa-pencil"></i></button>`;
+                // Now restored: Edit button
+                return `
+                    <button class="btn btn-info btn-sm text-white me-1" onclick="openEditExpense(${id})"><i class="fas fa-pencil"></i></button>
+                    <button class="btn btn-danger btn-sm text-white" onclick="deleteExpense(${id})"><i class="fas fa-trash"></i></button>
+                `;
             }
         }
     ]);
 }
 
-// 3. Balances
+// 3. Balances (Calculated locally from fetched expenses)
 function renderGroupBalances() {
-    const group = AppState.groups.find(g => g.id === currentGroupId);
+    const group = AppState.groups.find(g => g.id == currentGroupId);
     const container = $('#balancesContainer');
     container.empty();
 
@@ -373,8 +428,8 @@ function renderGroupBalances() {
     }
 
     txs.forEach(t => {
-        const fromName = AppState.people.find(p => p.id === t.from)?.name || '?';
-        const toName = AppState.people.find(p => p.id === t.to)?.name || '?';
+        const fromName = AppState.people.find(p => p.id == t.from)?.name || '?';
+        const toName = AppState.people.find(p => p.id == t.to)?.name || '?';
 
         container.append(`
             <div class="col-md-4">
@@ -399,12 +454,16 @@ function calculateBalances(group) {
 
     group.expenses.forEach(e => {
         const amt = parseFloat(e.amount);
-        bals[e.payerId] = (bals[e.payerId] || 0) + amt;
+        // Ensure keys are treated as same type (strings/ints)
+        const pid = e.payerId;
+        bals[pid] = (bals[pid] || 0) + amt;
+
         if (e.type === 'SHARED') {
             const share = amt / (e.involvedIds || []).length;
             (e.involvedIds || []).forEach(uid => bals[uid] = (bals[uid] || 0) - share);
         } else {
-            bals[e.borrowerId] = (bals[e.borrowerId] || 0) - amt;
+            const bid = e.borrowerId;
+            bals[bid] = (bals[bid] || 0) - amt;
         }
     });
 
@@ -437,11 +496,12 @@ function calculateBalances(group) {
 let editExpId = null;
 
 function openExpenseModal() {
-    const group = AppState.groups.find(g => g.id === currentGroupId);
+    const group = AppState.groups.find(g => g.id == currentGroupId);
     if ((group.memberIds || []).length === 0) {
         alert('Agrega integrantes primero'); return;
     }
-    editExpId = null;
+
+    editExpId = null; // Reset for new
     $('#expenseModalTitle').text('Nuevo Gasto');
     $('#btnDeleteExp').addClass('d-none');
     $('#expDesc').val('');
@@ -453,12 +513,15 @@ function openExpenseModal() {
 }
 
 function openEditExpense(id) {
-    const group = AppState.groups.find(g => g.id === currentGroupId);
-    const exp = group.expenses.find(e => e.id === id);
+    const group = AppState.groups.find(g => g.id == currentGroupId);
+    const exp = group.expenses.find(e => e.id == id);
     if (!exp) return;
 
     editExpId = id;
     $('#expenseModalTitle').text('Editar Gasto');
+
+    // Show delete button in modal if desired, or keep it in table. 
+    // In our UI the delete is in the table, but we can have it here too.
     $('#btnDeleteExp').removeClass('d-none');
 
     $('#expDesc').val(exp.desc);
@@ -471,7 +534,8 @@ function openEditExpense(id) {
     if (exp.type === 'SHARED') {
         const inv = exp.involvedIds || [];
         $('.split-check').each(function () {
-            $(this).prop('checked', inv.includes($(this).val()));
+            // Need to convert value to int/string matching
+            $(this).prop('checked', inv.includes(parseInt($(this).val())) || inv.includes($(this).val()));
         });
     } else {
         $('#expBorrower').val(exp.borrowerId);
@@ -485,7 +549,7 @@ function populateExpSelectors(group) {
     const checks = $('#expSplitChecks').empty();
 
     (group.memberIds || []).forEach(mid => {
-        const p = AppState.people.find(x => x.id === mid);
+        const p = AppState.people.find(x => x.id == mid);
         if (p) {
             payer.append(new Option(p.name, p.id));
             borrower.append(new Option(p.name, p.id));
@@ -512,7 +576,7 @@ function toggleExpType() {
     }
 }
 
-function saveExpense() {
+async function saveExpense() {
     const desc = $('#expDesc').val();
     const amount = parseFloat($('#expAmount').val());
     const payer = $('#expPayer').val();
@@ -520,66 +584,84 @@ function saveExpense() {
 
     if (!desc || !amount || !payer) { alert('Datos incompletos'); return; }
 
-    const obj = {
-        id: editExpId || Date.now().toString(),
-        desc, amount, payerId: payer, type,
-        date: new Date().toISOString()
+    const expensePayload = {
+        group_id: currentGroupId,
+        payer_id: payer,
+        description: desc,
+        amount: amount,
+        type: type,
+        borrower_id: type === 'LOAN' ? $('#expBorrower').val() : null
     };
 
+    let savedId = editExpId;
+
+    if (editExpId) {
+        // UPDATE
+        const { error: errUpd } = await supabase
+            .from('expenses')
+            .update(expensePayload)
+            .eq('id', editExpId);
+
+        if (errUpd) { alert('Error actualizando'); return; }
+
+        // Update involved: Delete all old, insert new (Simplest strategy)
+        if (type === 'SHARED') {
+            await supabase.from('expense_involved').delete().eq('expense_id', editExpId);
+        } else {
+            // If changed from SHARED to LOAN, we must also clear involved
+            await supabase.from('expense_involved').delete().eq('expense_id', editExpId);
+        }
+
+    } else {
+        // INSERT
+        const { data: expResult, error: errIns } = await supabase
+            .from('expenses')
+            .insert([expensePayload])
+            .select();
+
+        if (errIns) { alert('Error guardando'); console.log(errIns); return; }
+        savedId = expResult[0].id;
+    }
+
+    // Insert Involved (Shared)
     if (type === 'SHARED') {
         const inv = [];
         $('.split-check:checked').each(function () { inv.push($(this).val()); });
         if (inv.length === 0) { alert('Selecciona participantes'); return; }
-        obj.involvedIds = inv;
-    } else {
-        obj.borrowerId = $('#expBorrower').val();
+
+        const invPayload = inv.map(pid => ({ expense_id: savedId, person_id: pid }));
+        const { error: errInv } = await supabase.from('expense_involved').insert(invPayload);
+        if (errInv) console.log(errInv);
     }
 
-    const group = AppState.groups.find(g => g.id === currentGroupId);
-    if (editExpId) {
-        const idx = group.expenses.findIndex(e => e.id === editExpId);
-        if (idx !== -1) group.expenses[idx] = obj;
-    } else {
-        group.expenses.push(obj);
-    }
-    saveState();
     bootstrap.Modal.getInstance(document.getElementById('expenseModal')).hide();
-    renderGroupExpenses();
-    renderGroupBalances();
+    await openGroupDetail(currentGroupId);
 }
 
-function deleteExpense() {
+async function deleteExpense(id) {
+    if (!id && editExpId) id = editExpId; // Handle delete from modal
     if (confirm('¿Borrar?')) {
-        const group = AppState.groups.find(g => g.id === currentGroupId);
-        group.expenses = group.expenses.filter(e => e.id !== editExpId);
-        saveState();
-        bootstrap.Modal.getInstance(document.getElementById('expenseModal')).hide();
-        renderGroupExpenses();
-        renderGroupBalances();
+        const { error } = await supabase.from('expenses').delete().eq('id', id);
+        if (error) alert('Error borrando');
+        else {
+            if (bootstrap.Modal.getInstance(document.getElementById('expenseModal'))) {
+                bootstrap.Modal.getInstance(document.getElementById('expenseModal')).hide();
+            }
+            await openGroupDetail(currentGroupId);
+        }
     }
 }
+
 
 // --- Settings ---
 function openSettingsModal() {
     new bootstrap.Modal(document.getElementById('settingsModal')).show();
 }
-function exportData() {
-    const s = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(AppState));
-    const a = document.createElement('a'); a.href = s; a.download = "gastos_bkp.json";
-    document.body.appendChild(a); a.click(); a.remove();
-}
-function importData(input) {
-    if (!input.files[0]) return;
-    const r = new FileReader();
-    r.onload = e => {
-        try { AppState = JSON.parse(e.target.result); saveState(); location.reload(); }
-        catch (x) { alert('Error'); }
-    };
-    r.readAsText(input.files[0]);
-}
 
 window.openGroupDetail = openGroupDetail;
 window.deleteGroup = deleteGroup;
 window.deleteGlobalPerson = deleteGlobalPerson;
+window.toggleGroupStatus = toggleGroupStatus;
+window.removeMember = removeMember;
+window.deleteExpense = deleteExpense;
 window.openEditExpense = openEditExpense;
-window.toggleGroupStatus = toggleGroupStatus; // Exporting new function
