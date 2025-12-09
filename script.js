@@ -44,7 +44,10 @@ async function refreshData() {
         AppState.people = people || [];
 
         // 2. Fetch Groups
-        const { data: groups, error: errG } = await supabase.from('groups').select('*');
+        // 2. Fetch Groups (with Expenses Amount for totals)
+        const { data: groups, error: errG } = await supabase
+            .from('groups')
+            .select('*, expenses(amount)'); // Fetch related expenses (amounts only for efficiency)
         if (errG) throw errG;
 
         // 3. For the simplified UI logic we have, we need to nest expenses and members.
@@ -55,7 +58,9 @@ async function refreshData() {
         AppState.groups = groups.map(g => ({
             ...g,
             memberIds: [], // placeholder, loaded on detail
-            expenses: []   // placeholder, loaded on detail
+            // Calculate total from the 'expenses' relation we just fetched
+            totalAmount: (g.expenses || []).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0),
+            expenses: []   // placeholder, will be fully loaded on detail view
         }));
 
     } catch (error) {
@@ -186,17 +191,36 @@ function renderGroupsTable() {
             dateStr = 'Pagado: ' + new Date(g.paid_at).toLocaleDateString();
         }
 
+        // Resolving Owner Name
+        const owner = AppState.people.find(p => p.id == g.owner_id);
+        const ownerName = owner ? owner.name : '<span class="text-muted">--</span>';
+
+        // Calculate Total
+        const total = g.totalAmount || 0;
+
         return {
             name: g.name,
+            ownerName: ownerName,
+            isPublic: g.is_public, // from DB
             status: g.status,
             date: dateStr,
-            totalStr: '--', // Calculation requires fetching all expenses, omitted for list performance
+            totalStr: '$' + total.toLocaleString('es-MX', { minimumFractionDigits: 2 }),
             id: g.id
         };
     });
 
     initTable('groupsTable', data, [
-        { data: 'name' },
+        {
+            data: 'name',
+            render: function (data, type, row) {
+                // Show Lock/Globe icon
+                const visIcon = row.isPublic
+                    ? '<i class="fas fa-globe-americas text-primary" title="Público"></i>'
+                    : '<i class="fas fa-lock text-secondary" title="Privado"></i>';
+                return `${visIcon} ${data}`;
+            }
+        },
+        { data: 'ownerName' },
         {
             data: 'status',
             render: function (s) {
@@ -240,18 +264,38 @@ async function toggleGroupStatus(id, currentStatus) {
 
 function openCreateGroupModal() {
     $('#newGroupName').val('');
+    $('#newGroupPublic').prop('checked', false);
+
+    // Populate Owner Select
+    const s = $('#newGroupOwner').empty();
+    s.append('<option value="">-- Selecciona --</option>');
+    AppState.people.forEach(p => {
+        s.append(new Option(p.name, p.id));
+    });
+
     new bootstrap.Modal(document.getElementById('createGroupModal')).show();
 }
 
 async function createGroup() {
     const name = $('#newGroupName').val().trim();
+    const ownerId = $('#newGroupOwner').val();
+    const isPublic = $('#newGroupPublic').is(':checked');
+
     if (name) {
-        const { error } = await supabase.from('groups').insert([{ name }]);
+        const payload = {
+            name: name,
+            owner_id: ownerId || null,
+            is_public: isPublic
+        };
+
+        const { error } = await supabase.from('groups').insert([payload]);
         if (error) alert('Error creando grupo');
         else {
             bootstrap.Modal.getInstance(document.getElementById('createGroupModal')).hide();
             showView('groups');
         }
+    } else {
+        alert('El nombre es obligatorio');
     }
 }
 

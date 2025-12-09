@@ -144,6 +144,7 @@
                                     <thead>
                                         <tr>
                                             <th>Nombre</th>
+                                            <th>Creado Por</th>
                                             <th>Estado</th>
                                             <th>Fechas</th>
                                             <th>Total</th>
@@ -303,6 +304,20 @@
                     <div class="mb-3">
                         <label class="form-label">Nombre del Grupo</label>
                         <input type="text" class="form-control" id="newGroupName">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Creado Por (Dueño)</label>
+                        <select class="form-select" id="newGroupOwner">
+                            <option value="">-- Selecciona --</option>
+                        </select>
+                        <small class="text-muted">Quién administra este grupo.</small>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="newGroupPublic">
+                        <label class="form-check-label" for="newGroupPublic">Hacer Grupo Público</label>
+                    </div>
+                    <div class="form-text mb-3">
+                        <i class="fas fa-lock text-muted"></i> Por defecto es Privado (solo tú lo ves crearlo).
                     </div>
                 </div>
                 <div class="modal-footer">
