@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Gastos</title>
+
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap5.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.4.1/css/responsive.bootstrap5.min.css">
+    <!-- Custom Style -->
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="bg-light">
+
+    <!-- Wrapper -->
+    <div class="d-flex" id="wrapper">
+
+        <!-- Sidebar -->
+        <div class="bg-white border-end" id="sidebar-wrapper">
+            <div class="sidebar-heading border-bottom bg-light">
+                <i class="fas fa-wallet text-primary me-2"></i><strong>GastosApp</strong>
+            </div>
+            <div class="list-group list-group-flush">
+                <a href="#" class="list-group-item list-group-item-action list-group-item-light p-3 active"
+                    id="nav-home" onclick="showView('dashboard')">
+                    <i class="fas fa-tachometer-alt me-2"></i>Dashboard
+                </a>
+                <a href="#" class="list-group-item list-group-item-action list-group-item-light p-3" id="nav-groups"
+                    onclick="showView('groups')">
+                    <i class="fas fa-layer-group me-2"></i>Grupos
+                </a>
+                <a href="#" class="list-group-item list-group-item-action list-group-item-light p-3" id="nav-people"
+                    onclick="showView('people')">
+                    <i class="fas fa-users me-2"></i>Integrantes
+                </a>
+            </div>
+        </div>
+
+        <!-- Page Content -->
+        <div id="page-content-wrapper" class="w-100">
+
+            <!-- Top Navbar -->
+            <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom shadow-sm">
+                <div class="container-fluid">
+                    <button class="btn btn-outline-secondary" id="menu-toggle"><i class="fas fa-bars"></i></button>
+
+                    <span class="navbar-brand ms-3">Gestor de Gastos</span>
+
+                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#navbarSupportedContent">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+
+                    <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                        <ul class="navbar-nav ms-auto mt-2 mt-lg-0">
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" onclick="openSettingsModal()"><i class="fas fa-cog"></i>
+                                    Configuración</a>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- Main Content Container -->
+            <div class="container-fluid p-4">
+
+                <!-- DASHBOARD VIEW -->
+                <div id="view-dashboard" class="fade-in">
+                    <h2 class="mb-4">Resumen General</h2>
+                    <div class="row g-4 mb-4">
+                        <div class="col-md-6 col-lg-3">
+                            <div class="card h-100 border-0 shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <p class="text-muted mb-1">Grupos Activos</p>
+                                            <h3 class="fw-bold mb-0" id="dash-total-groups">0</h3>
+                                        </div>
+                                        <div class="fs-1 text-primary-emphasis opacity-25">
+                                            <i class="fas fa-layer-group"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6 col-lg-3">
+                            <div class="card h-100 border-0 shadow-sm">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <p class="text-muted mb-1">Integrantes Globales</p>
+                                            <h3 class="fw-bold mb-0" id="dash-total-people">0</h3>
+                                        </div>
+                                        <div class="fs-1 text-success-emphasis opacity-25">
+                                            <i class="fas fa-users"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white py-3">
+                            <h5 class="mb-0">Grupos Recientes</h5>
+                        </div>
+                        <div class="card-body">
+                            <table id="dashGroupsTable" class="table table-striped w-100 display responsive nowrap">
+                                <thead>
+                                    <tr>
+                                        <th>Nombre</th>
+                                        <th>Estado</th>
+                                        <th>Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GROUPS INDEX VIEW -->
+                <div id="view-groups" class="d-none fade-in">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Listado de Grupos</h2>
+                        <button class="btn btn-primary" onclick="openCreateGroupModal()">
+                            <i class="fas fa-plus me-1"></i> Nuevo Grupo
+                        </button>
+                    </div>
+
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-body">
+                            <div class=""> <!-- table-responsive removed for DT Responsive plugin to work best -->
+                                <table id="groupsTable"
+                                    class="table table-striped table-hover w-100 display responsive nowrap">
+                                    <thead>
+                                        <tr>
+                                            <th>Nombre</th>
+                                            <th>Estado</th>
+                                            <th>Fechas</th>
+                                            <th>Total</th>
+                                            <th>Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- PEOPLE INDEX VIEW -->
+                <div id="view-people" class="d-none fade-in">
+                    <h2 class="mb-4">Directorio de Integrantes</h2>
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-header bg-success text-white">
+                                    <h5 class="mb-0">Agregar Nuevo</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label">Nombre Completo</label>
+                                        <input type="text" id="globalPersonName" class="form-control"
+                                            placeholder="Ej. Juan Pérez">
+                                    </div>
+                                    <button class="btn btn-success w-100" onclick="addGlobalPerson()">Guardar</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <div class="card border-0 shadow-sm">
+                                <div class="card-body">
+                                    <table id="peopleTable" class="table table-striped w-100 display responsive nowrap">
+                                        <thead>
+                                            <tr>
+                                                <th>Nombre</th>
+                                                <th>Acciones</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GROUP DETAIL VIEW -->
+                <div id="view-group-detail" class="d-none fade-in">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2 class="mb-0">Detalle: <span id="detailGroupName" class="text-primary"></span></h2>
+                        <button class="btn btn-outline-secondary btn-sm" onclick="showView('groups')">
+                            <i class="fas fa-arrow-left"></i> Volver
+                        </button>
+                    </div>
+
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white">
+                            <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                                <li class="nav-item">
+                                    <a class="nav-link active" data-bs-toggle="tab" href="#tab-expenses">Gastos</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" data-bs-toggle="tab" href="#tab-balances">Saldos</a>
+                                </li>
+                                <li class="nav-item">
+                                    <a class="nav-link" data-bs-toggle="tab" href="#tab-members">Integrantes</a>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="card-body">
+                            <div class="tab-content">
+
+                                <!-- Expenses Tab -->
+                                <div class="tab-pane fade show active" id="tab-expenses">
+                                    <div class="mb-3">
+                                        <button class="btn btn-success" onclick="openExpenseModal()">
+                                            <i class="fas fa-plus-circle me-1"></i> Registrar Gasto
+                                        </button>
+                                    </div>
+                                    <div class="">
+                                        <table id="expensesTable"
+                                            class="table table-bordered table-striped w-100 display responsive nowrap">
+                                            <thead>
+                                                <tr>
+                                                    <th>Fecha</th>
+                                                    <th>Descripción</th>
+                                                    <th>Pagó</th>
+                                                    <th>Tipo</th>
+                                                    <th>Monto</th>
+                                                    <th>Acciones</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody></tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Balances Tab -->
+                                <div class="tab-pane fade" id="tab-balances">
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i>Cómo saldar las cuentas entre los
+                                        miembros.
+                                    </div>
+                                    <div id="balancesContainer" class="row g-3"></div>
+                                </div>
+
+                                <!-- Members Tab -->
+                                <div class="tab-pane fade" id="tab-members">
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <h5>Miembros del Grupo</h5>
+                                            <ul class="list-group" id="groupMembersList"></ul>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="card bg-light border-0">
+                                                <div class="card-body">
+                                                    <h5>Añadir Miembro Existente</h5>
+                                                    <div class="input-group mb-3">
+                                                        <select class="form-select" id="selectPersonToAdd">
+                                                            <option selected>Seleccionar...</option>
+                                                        </select>
+                                                        <button class="btn btn-primary"
+                                                            onclick="addMemberToGroup()">Añadir</button>
+                                                    </div>
+                                                    <small class="text-muted">Si la persona no existe, créala primero en
+                                                        la sección "Integrantes".</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+
+    <!-- Create Group Modal -->
+    <div class="modal fade" id="createGroupModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Nuevo Grupo</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Nombre del Grupo</label>
+                        <input type="text" class="form-control" id="newGroupName">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" onclick="createGroup()">Crear</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Expense Modal -->
+    <div class="modal fade" id="expenseModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title" id="expenseModalTitle">Registrar Gasto</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-8">
+                            <label class="form-label">Descripción</label>
+                            <input type="text" class="form-control" id="expDesc">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Monto</label>
+                            <div class="input-group">
+                                <span class="input-group-text">$</span>
+                                <input type="number" class="form-control" id="expAmount">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Pagado Por</label>
+                            <select class="form-select" id="expPayer"></select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Tipo</label>
+                            <select class="form-select" id="expType" onchange="toggleExpType()">
+                                <option value="SHARED">Compartido (División)</option>
+                                <option value="LOAN">Préstamo Directo</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Shared Section -->
+                    <div id="expSharedSection" class="p-3 bg-light rounded border">
+                        <label class="form-label fw-bold">Dividir entre:</label>
+                        <div id="expSplitChecks" class="row"></div>
+                    </div>
+
+                    <!-- Loan Section -->
+                    <div id="expLoanSection" class="p-3 bg-warning-subtle rounded border d-none">
+                        <label class="form-label fw-bold">Prestar a:</label>
+                        <select class="form-select" id="expBorrower"></select>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-danger me-auto d-none" id="btnDeleteExp"
+                        onclick="deleteExpense()">Eliminar</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-success" onclick="saveExpense()">Guardar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal fade" id="settingsModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Configuración</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <p class="text-muted">Gestión de Copias de Seguridad</p>
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-outline-primary" onclick="exportData()">
+                            <i class="fas fa-download me-2"></i>Descargar Respaldo (JSON)
+                        </button>
+                        <button class="btn btn-outline-secondary"
+                            onclick="document.getElementById('fileImport').click()">
+                            <i class="fas fa-upload me-2"></i>Restaurar Respaldo
+                        </button>
+                        <input type="file" id="fileImport" hidden onchange="importData(this)">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Libraries (JQuery, Popper, Bootstrap, DataTables + Responsive) -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/responsive/2.4.1/js/dataTables.responsive.min.js"></script>
+    <script src="https://cdn.datatables.net/responsive/2.4.1/js/responsive.bootstrap5.min.js"></script>
+
+    <!-- App Logic -->
+    <script src="script.js"></script>
+</body>
+
+</html>
