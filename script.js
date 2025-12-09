@@ -20,13 +20,81 @@ let tables = {};
 // --- Initialization ---
 $(document).ready(async function () {
     initLayout();
+
+    // Check Session
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (session) {
+        // Logged in
+        handleLoginSuccess(session.user);
+    } else {
+        // Not logged in
+        showView('auth');
+    }
+
+    // Listen for auth changes
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN') handleLoginSuccess(session.user);
+        if (event === 'SIGNED_OUT') {
+            AppState = { people: [], groups: [] }; // Clear state
+            showView('auth');
+        }
+    });
+
+    // Handle Login Form Submit
+    $('#loginForm').submit(async (e) => {
+        e.preventDefault();
+        const email = $('#authEmail').val();
+        const password = $('#authPassword').val();
+        const isRegistering = $('#loginBtnText').text() === 'Registrarse'; // Simple toggle check logic
+
+        if (isAuthRegisterMode) {
+            const { data, error } = await supabase.auth.signUp({ email, password });
+            if (error) alert('Error registro: ' + error.message);
+            else alert('¡Registro exitoso! Ya puedes iniciar sesión (o revisa tu correo si activaste confirmación).');
+        } else {
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            if (error) alert('Error login: ' + error.message);
+        }
+    });
+});
+
+let isAuthRegisterMode = false;
+function toggleAuthMode() {
+    isAuthRegisterMode = !isAuthRegisterMode;
+    const btn = $('#loginForm button[type="submit"]');
+    const link = $('#view-auth .btn-link');
+
+    if (isAuthRegisterMode) {
+        btn.text('Registrarse');
+        btn.removeClass('btn-primary').addClass('btn-success');
+        link.text('¿Ya tienes cuenta? Inicia Sesión');
+    } else {
+        btn.text('Iniciar Sesión');
+        btn.removeClass('btn-success').addClass('btn-primary');
+        link.text('Registrarse');
+    }
+}
+
+let currentSessionUser = null;
+
+async function handleLoginSuccess(user) {
+    console.log("Logged in as:", user.email);
+    currentSessionUser = user;
+    // Hide sidebar/nav elements if they were hidden (optional, but good for pure auth view)
+    // For now, showView handles showing the dashboard
     try {
-        await refreshData(); // Initial Fetch
+        await refreshData();
+        showView('dashboard');
     } catch (e) {
         console.error(e);
     }
-    showView('dashboard');
-});
+}
+
+async function logout() {
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error('Error Logout:', error);
+}
 
 function initLayout() {
     $("#menu-toggle").click(function (e) {
@@ -34,6 +102,7 @@ function initLayout() {
         $("body").toggleClass("sb-sidenav-toggled");
     });
 }
+
 
 // --- Data Synchronization (The Core) ---
 async function refreshData() {
@@ -112,7 +181,19 @@ async function showView(viewName) {
     $('.list-group-item').removeClass('active');
     $(`#nav-${viewName}`).addClass('active');
 
-    $('#view-dashboard, #view-groups, #view-people, #view-group-detail').addClass('d-none');
+    // Hide all
+    $('#view-auth, #view-dashboard, #view-groups, #view-people, #view-group-detail').addClass('d-none');
+
+    // Sidebar: Hide on auth, Show on app
+    if (viewName === 'auth') {
+        $('#sidebar-wrapper').addClass('d-none'); // Hide sidebar on login
+        $('#menu-toggle').addClass('d-none');
+        $('#view-auth').removeClass('d-none');
+        return;
+    } else {
+        $('#sidebar-wrapper').removeClass('d-none');
+        $('#menu-toggle').removeClass('d-none');
+    }
 
     if (viewName === 'dashboard') {
         $('#view-dashboard').removeClass('d-none');
@@ -192,8 +273,16 @@ function renderGroupsTable() {
         }
 
         // Resolving Owner Name
-        const owner = AppState.people.find(p => p.id == g.owner_id);
-        const ownerName = owner ? owner.name : '<span class="text-muted">--</span>';
+        // Resolving Owner Name
+        let ownerName = '<span class="text-muted">Desconocido</span>';
+        if (g.created_by) {
+            if (currentSessionUser && g.created_by === currentSessionUser.id) {
+                ownerName = '<span class="badge bg-primary">Tú</span>';
+            } else {
+                ownerName = '<span class="badge bg-secondary">Otro</span>';
+            }
+        }
+        // Fallback to legacy owner_id if exists/needed, or keep simpple
 
         // Calculate Total
         const total = g.totalAmount || 0;
@@ -240,6 +329,7 @@ function renderGroupsTable() {
 
                 return `
                     <button class="btn btn-primary btn-sm me-1" onclick="openGroupDetail(${id})"><i class="fas fa-eye"></i></button>
+                    <button class="btn btn-info btn-sm me-1 text-white" onclick="openGroupModal(${id})"><i class="fas fa-pencil"></i></button>
                     <button class="btn ${toggleClass} btn-sm me-1" title="${toggleTitle}" onclick="toggleGroupStatus(${id}, '${row.status}')"><i class="fas ${toggleIcon}"></i></button>
                     <button class="btn btn-danger btn-sm" onclick="deleteGroup(${id})"><i class="fas fa-trash"></i></button>
                 `;
@@ -262,40 +352,60 @@ async function toggleGroupStatus(id, currentStatus) {
     }
 }
 
-function openCreateGroupModal() {
-    $('#newGroupName').val('');
-    $('#newGroupPublic').prop('checked', false);
+// --- Group Management (Create / Edit) ---
+let editingGroupId = null;
 
-    // Populate Owner Select
-    const s = $('#newGroupOwner').empty();
-    s.append('<option value="">-- Selecciona --</option>');
-    AppState.people.forEach(p => {
-        s.append(new Option(p.name, p.id));
-    });
+function openGroupModal(id = null) {
+    editingGroupId = id;
 
-    new bootstrap.Modal(document.getElementById('createGroupModal')).show();
+    if (id) {
+        // Edit Mode
+        const group = AppState.groups.find(g => g.id == id);
+        if (!group) return;
+
+        $('#groupModalTitle').text('Editar Grupo');
+        $('#groupName').val(group.name);
+        $('#groupPublic').prop('checked', group.isPublic);
+    } else {
+        // Create Mode
+        $('#groupModalTitle').text('Nuevo Grupo');
+        $('#groupName').val('');
+        $('#groupPublic').prop('checked', false);
+    }
+
+    new bootstrap.Modal(document.getElementById('groupModal')).show();
 }
 
-async function createGroup() {
-    const name = $('#newGroupName').val().trim();
-    const ownerId = $('#newGroupOwner').val();
-    const isPublic = $('#newGroupPublic').is(':checked');
+async function saveGroup() {
+    const name = $('#groupName').val().trim();
+    const isPublic = $('#groupPublic').is(':checked');
 
-    if (name) {
-        const payload = {
-            name: name,
-            owner_id: ownerId || null,
-            is_public: isPublic
-        };
+    if (!name) { alert('Nombre requerido'); return; }
 
-        const { error } = await supabase.from('groups').insert([payload]);
-        if (error) alert('Error creando grupo');
-        else {
-            bootstrap.Modal.getInstance(document.getElementById('createGroupModal')).hide();
-            showView('groups');
-        }
+    const payload = {
+        name: name,
+        is_public: isPublic
+        // created_by is handled automatically by Supabase for INSERT
+        // owner_id (Legacy Person ID) is ignored for now to simplify
+    };
+
+    let error = null;
+
+    if (editingGroupId) {
+        // Update
+        const res = await supabase.from('groups').update(payload).eq('id', editingGroupId);
+        error = res.error;
     } else {
-        alert('El nombre es obligatorio');
+        // Insert
+        const res = await supabase.from('groups').insert([payload]);
+        error = res.error;
+    }
+
+    if (error) {
+        alert('Error guardando grupo: ' + error.message);
+    } else {
+        bootstrap.Modal.getInstance(document.getElementById('groupModal')).hide();
+        showView('groups');
     }
 }
 
@@ -709,3 +819,5 @@ window.toggleGroupStatus = toggleGroupStatus;
 window.removeMember = removeMember;
 window.deleteExpense = deleteExpense;
 window.openEditExpense = openEditExpense;
+window.openGroupModal = openGroupModal;
+window.saveGroup = saveGroup;
