@@ -124,13 +124,15 @@ async function refreshData() {
         // or trigger on-demand loading when opening a group. 
         // Let's load mainly the list first.
 
-        AppState.groups = groups.map(g => ({
-            ...g,
-            memberIds: [], // placeholder, loaded on detail
-            // Calculate total from the 'expenses' relation we just fetched
-            totalAmount: (g.expenses || []).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0),
-            expenses: []   // placeholder, will be fully loaded on detail view
-        }));
+        AppState.groups = groups
+            .filter(g => g.is_public || (currentSessionUser && g.created_by === currentSessionUser.id))
+            .map(g => ({
+                ...g,
+                memberIds: [], // placeholder, loaded on detail
+                // Calculate total from the 'expenses' relation we just fetched
+                totalAmount: (g.expenses || []).reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0),
+                expenses: []   // placeholder, will be fully loaded on detail view
+            }));
 
     } catch (error) {
         console.error("Error fetching data:", error);
@@ -294,7 +296,8 @@ function renderGroupsTable() {
             status: g.status,
             date: dateStr,
             totalStr: '$' + total.toLocaleString('es-MX', { minimumFractionDigits: 2 }),
-            id: g.id
+            id: g.id,
+            createdBy: g.created_by
         };
     });
 
@@ -322,16 +325,31 @@ function renderGroupsTable() {
         { data: 'totalStr' },
         {
             data: 'id',
+            className: 'text-end',
             render: function (id, type, row) {
-                const toggleTitle = row.status === 'PENDING' ? 'Marcar Pagado' : 'Reabrir (Pendiente)';
-                const toggleIcon = row.status === 'PENDING' ? 'fa-check' : 'fa-undo';
-                const toggleClass = row.status === 'PENDING' ? 'btn-outline-success' : 'btn-outline-warning';
+                const isCreator = currentSessionUser && row.createdBy === currentSessionUser.id;
+                const isPaid = row.status === 'PAID';
 
+                // Common Button
+                const viewBtn = `<button class="btn btn-sm btn-primary ms-1" title="Ver" onclick="openGroupDetail(${id})"><i class="fas fa-eye"></i></button>`;
+
+                // SCENARIO 1: Not Creator -> READ ONLY
+                if (!isCreator) {
+                    return viewBtn;
+                }
+
+                // SCENARIO 2: Creator BUT Paid -> READ ONLY + REOPEN
+                if (isPaid) {
+                    const reopenBtn = `<button class="btn btn-sm btn-warning" title="Reabrir" onclick="toggleGroupStatus(${id}, 'PENDING')"><i class="fas fa-undo"></i></button>`;
+                    return `${reopenBtn} ${viewBtn}`;
+                }
+
+                // SCENARIO 3: Creator AND Pending -> FULL CONTROL
                 return `
-                    <button class="btn btn-primary btn-sm me-1" onclick="openGroupDetail(${id})"><i class="fas fa-eye"></i></button>
-                    <button class="btn btn-info btn-sm me-1 text-white" onclick="openGroupModal(${id})"><i class="fas fa-pencil"></i></button>
-                    <button class="btn ${toggleClass} btn-sm me-1" title="${toggleTitle}" onclick="toggleGroupStatus(${id}, '${row.status}')"><i class="fas ${toggleIcon}"></i></button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteGroup(${id})"><i class="fas fa-trash"></i></button>
+                    <button class="btn btn-sm btn-info text-white" title="Editar" onclick="openGroupModal(${id})"><i class="fas fa-pencil"></i></button>
+                    <button class="btn btn-sm btn-success mx-1" title="Marcar Pagado" onclick="toggleGroupStatus(${id}, 'PAID')"><i class="fas fa-check"></i></button>
+                    <button class="btn btn-sm btn-danger" title="Eliminar" onclick="deleteGroup(${id})"><i class="fas fa-trash"></i></button>
+                    ${viewBtn}
                 `;
             }
         }
@@ -469,7 +487,23 @@ async function openGroupDetail(id) {
     const group = AppState.groups.find(g => g.id == id);
     if (!group) return;
 
-    $('#detailGroupName').text(group.name + (group.status === 'PAID' ? ' (Pagado)' : ''));
+    // Check Permissions
+    const isCreator = currentSessionUser && group.created_by === currentSessionUser.id;
+    const isPaid = group.status === 'PAID';
+    const isReadOnly = !isCreator || isPaid;
+
+    let titleSuffix = '';
+    if (isPaid) titleSuffix += ' <span class="badge bg-success small">Pagado</span>';
+    if (!isCreator) titleSuffix += ' <span class="badge bg-secondary small">Vista</span>';
+
+    $('#detailGroupName').html(group.name + titleSuffix);
+
+    // Show/Hide "Registrar Gasto" button
+    if (isReadOnly) {
+        $('#btnNewExpense').addClass('d-none');
+    } else {
+        $('#btnNewExpense').removeClass('d-none');
+    }
 
     var firstTabEl = document.querySelector('#view-group-detail .nav-link[href="#tab-expenses"]')
     var firstTab = new bootstrap.Tab(firstTabEl)
@@ -558,8 +592,15 @@ function renderGroupExpenses() {
         { data: 'amount' },
         {
             data: 'id',
+            className: 'text-end',
             render: function (id) {
-                // Now restored: Edit button
+                // Determine permissions again (could be passed down but global access is fine for now)
+                const isCreator = currentSessionUser && group.created_by === currentSessionUser.id;
+                const isPaid = group.status === 'PAID';
+
+                if (!isCreator || isPaid) {
+                    return '<span class="text-muted"><i class="fas fa-lock" title="Solo lectura"></i></span>';
+                }
                 return `
                     <button class="btn btn-info btn-sm text-white me-1" onclick="openEditExpense(${id})"><i class="fas fa-pencil"></i></button>
                     <button class="btn btn-danger btn-sm text-white" onclick="deleteExpense(${id})"><i class="fas fa-trash"></i></button>
@@ -736,6 +777,19 @@ async function saveExpense() {
     const payer = $('#expPayer').val();
     const type = $('#expType').val();
 
+    // Safety Check: Is Group Paid? OR Not Creator?
+    const group = AppState.groups.find(g => g.id == currentGroupId);
+    if (group) {
+        if (group.status === 'PAID') {
+            alert('Este grupo está pagado y cerrado. No se pueden modificar gastos.');
+            return;
+        }
+        if (currentSessionUser && group.created_by !== currentSessionUser.id) {
+            alert('Solo el creador del grupo puede modificar gastos.');
+            return;
+        }
+    }
+
     if (!desc || !amount || !payer) { alert('Datos incompletos'); return; }
 
     const expensePayload = {
@@ -794,6 +848,20 @@ async function saveExpense() {
 
 async function deleteExpense(id) {
     if (!id && editExpId) id = editExpId; // Handle delete from modal
+
+    // Safety Check
+    const group = AppState.groups.find(g => g.id == currentGroupId);
+    if (group) {
+        if (group.status === 'PAID') {
+            alert('Grupo cerrado. No se puede borrar.');
+            return;
+        }
+        if (currentSessionUser && group.created_by !== currentSessionUser.id) {
+            alert('Solo el creador puede eliminar gastos.');
+            return;
+        }
+    }
+
     if (confirm('¿Borrar?')) {
         const { error } = await supabase.from('expenses').delete().eq('id', id);
         if (error) alert('Error borrando');
