@@ -6,7 +6,7 @@
 const SUPABASE_URL = 'https://qcgabxqoqxtdrvugqalr.supabase.co';
 const SUPABASE_KEY = 'sb_publishable__OQcd-N-fk5WSAM6eGdxfw_9UB-DPvG'; // Public Anon Key
 const { createClient } = window.supabase;
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+var supabase = createClient(SUPABASE_URL, SUPABASE_KEY); // Usamos var para permitir re-declaración en caso de que el script se cargue doble
 
 // --- Local Cache State (for UI rendering) ---
 // We keep a local copy to avoid refactoring the entire UI logic, 
@@ -945,6 +945,15 @@ function openSettingsModal() {
     new bootstrap.Modal(document.getElementById('settingsModal')).show();
 }
 
+window.showView = showView;
+window.logout = logout;
+window.toggleAuthMode = toggleAuthMode;
+window.addGlobalPerson = addGlobalPerson;
+window.addMemberToGroup = addMemberToGroup;
+window.toggleExpType = toggleExpType;
+window.saveExpense = saveExpense;
+window.openExpenseModal = openExpenseModal;
+window.openSettingsModal = openSettingsModal;
 window.openGroupDetail = openGroupDetail;
 window.deleteGroup = deleteGroup;
 window.deleteGlobalPerson = deleteGlobalPerson;
