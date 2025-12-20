@@ -49,9 +49,22 @@ $(document).ready(async function () {
         const isRegistering = $('#loginBtnText').text() === 'Registrarse'; // Simple toggle check logic
 
         if (isAuthRegisterMode) {
-            const { data, error } = await supabase.auth.signUp({ email, password });
+            const name = $('#authName').val().trim();
+            if (!name) {
+                alert('Por favor ingresa tu nombre completo');
+                return;
+            }
+            const { data, error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    data: {
+                        name: name  // Pasar nombre a metadata
+                    }
+                }
+            });
             if (error) alert('Error registro: ' + error.message);
-            else alert('¡Registro exitoso! Ya puedes iniciar sesión (o revisa tu correo si activaste confirmación).');
+            else alert('¡Registro exitoso! Ya puedes iniciar sesión.');
         } else {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
             if (error) alert('Error login: ' + error.message);
@@ -64,28 +77,58 @@ function toggleAuthMode() {
     isAuthRegisterMode = !isAuthRegisterMode;
     const btn = $('#loginForm button[type="submit"]');
     const link = $('#view-auth .btn-link');
+    const nameField = $('#nameFieldContainer');
 
     if (isAuthRegisterMode) {
         btn.text('Registrarse');
         btn.removeClass('btn-primary').addClass('btn-success');
         link.text('¿Ya tienes cuenta? Inicia Sesión');
+        nameField.show();  // Mostrar campo nombre
     } else {
         btn.text('Iniciar Sesión');
         btn.removeClass('btn-success').addClass('btn-primary');
         link.text('Registrarse');
+        nameField.hide();  // Ocultar campo nombre
     }
 }
 
 let currentSessionUser = null;
+let currentUserPerson = null;  // Perfil del usuario en tabla people
 
 async function handleLoginSuccess(user) {
     console.log("Logged in as:", user.email);
     currentSessionUser = user;
-    // Hide sidebar/nav elements if they were hidden (optional, but good for pure auth view)
-    // For now, showView handles showing the dashboard
+
+    // Cargar perfil del usuario (su registro en people)
+    await loadUserProfile();
+
     try {
         await refreshData();
         showView('dashboard');
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function loadUserProfile() {
+    if (!currentSessionUser) return;
+
+    try {
+        const { data, error } = await supabase
+            .from('people')
+            .select('*')
+            .eq('user_id', currentSessionUser.id)
+            .single();
+
+        if (error) {
+            console.error('Error cargando perfil:', error);
+            return;
+        }
+
+        if (data) {
+            currentUserPerson = data;
+            console.log('Perfil cargado:', data.name);
+        }
     } catch (e) {
         console.error(e);
     }
@@ -112,11 +155,10 @@ async function refreshData() {
         if (errP) throw errP;
         AppState.people = people || [];
 
-        // 2. Fetch Groups
-        // 2. Fetch Groups (with Expenses Amount for totals)
+        // 2. Fetch Groups (with Expenses Amount for totals AND members for filtering)
         const { data: groups, error: errG } = await supabase
             .from('groups')
-            .select('*, expenses(amount)'); // Fetch related expenses (amounts only for efficiency)
+            .select('*, expenses(amount), group_members(person_id)');
         if (errG) throw errG;
 
         // 3. For the simplified UI logic we have, we need to nest expenses and members.
@@ -125,7 +167,21 @@ async function refreshData() {
         // Let's load mainly the list first.
 
         AppState.groups = groups
-            .filter(g => g.is_public || (currentSessionUser && g.created_by === currentSessionUser.id))
+            .filter(g => {
+                const isCreator = currentSessionUser && g.created_by === currentSessionUser.id;
+                const isPublic = g.is_public;
+
+                // Check if current user is a member
+                let isMember = false;
+                if (currentUserPerson && g.group_members) {
+                    isMember = g.group_members.some(gm => gm.person_id === currentUserPerson.id);
+                }
+
+                // REGLAS DE VISIBILIDAD:
+                // 1. Siempre ver grupos propios (creados por mí)
+                // 2. Ver grupos públicos donde soy miembro
+                return isCreator || (isPublic && isMember);
+            })
             .map(g => ({
                 ...g,
                 memberIds: [], // placeholder, loaded on detail
@@ -439,11 +495,20 @@ async function deleteGroup(id) {
 function renderPeopleTable() {
     const data = AppState.people.map(p => ({
         name: p.name,
+        hasAccount: !!p.user_id,  // TRUE si tiene cuenta
         id: p.id
     }));
 
     initTable('peopleTable', data, [
-        { data: 'name' },
+        {
+            data: 'name',
+            render: function (data, type, row) {
+                const badge = row.hasAccount
+                    ? '<span class="badge bg-success ms-2"><i class="fas fa-user-check"></i> Con Cuenta</span>'
+                    : '<span class="badge bg-secondary ms-2"><i class="fas fa-user"></i> Invitado</span>';
+                return data + badge;
+            }
+        },
         {
             data: 'id',
             render: function (id) {
