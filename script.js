@@ -46,28 +46,105 @@ $(document).ready(async function () {
         e.preventDefault();
         const email = $('#authEmail').val();
         const password = $('#authPassword').val();
-        const isRegistering = $('#loginBtnText').text() === 'Registrarse'; // Simple toggle check logic
 
         if (isAuthRegisterMode) {
+            // REGISTRO
             const name = $('#authName').val().trim();
+            const username = $('#authUsername').val().trim();
+
             if (!name) {
-                alert('Por favor ingresa tu nombre completo');
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Nombre requerido',
+                    text: 'Por favor ingresa tu nombre completo',
+                    confirmButtonColor: '#0d6efd'
+                });
                 return;
             }
+
+            if (!username) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Usuario requerido',
+                    text: 'Por favor ingresa tu nombre de usuario',
+                    confirmButtonColor: '#0d6efd'
+                });
+                return;
+            }
+
+            // Validar que el username solo contenga caracteres válidos
+            const usernameRegex = /^[a-zA-Z0-9_]+$/;
+            if (!usernameRegex.test(username)) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Usuario inválido',
+                    text: 'El nombre de usuario solo puede contener letras, números y guiones bajos',
+                    confirmButtonColor: '#0d6efd'
+                });
+                return;
+            }
+
+            // Verificar si el username ya existe
+            const isAvailable = await checkUsernameAvailability(username);
+            if (!isAvailable) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Usuario no disponible',
+                    text: 'Este nombre de usuario ya está en uso. Por favor elige otro diferente.',
+                    confirmButtonColor: '#0d6efd'
+                });
+                return;
+            }
+
+            // Mostrar loading
+            Swal.fire({
+                title: 'Registrando...',
+                text: 'Por favor espera',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
             const { data, error } = await supabase.auth.signUp({
                 email,
                 password,
                 options: {
                     data: {
-                        name: name  // Pasar nombre a metadata
+                        name: name,
+                        username: username
                     }
                 }
             });
-            if (error) alert('Error registro: ' + error.message);
-            else alert('¡Registro exitoso! Ya puedes iniciar sesión.');
+
+            Swal.close();
+
+            if (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error de registro',
+                    text: error.message,
+                    confirmButtonColor: '#0d6efd'
+                });
+            } else {
+                Swal.fire({
+                    icon: 'success',
+                    title: '¡Registro exitoso!',
+                    text: 'Ya puedes iniciar sesión con tu cuenta',
+                    confirmButtonColor: '#0d6efd'
+                });
+            }
         } else {
+            // LOGIN
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-            if (error) alert('Error login: ' + error.message);
+            if (error) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error de inicio de sesión',
+                    text: error.message,
+                    confirmButtonColor: '#0d6efd'
+                });
+            }
         }
     });
 });
@@ -78,17 +155,42 @@ function toggleAuthMode() {
     const btn = $('#loginForm button[type="submit"]');
     const link = $('#view-auth .btn-link');
     const nameField = $('#nameFieldContainer');
+    const usernameField = $('#usernameFieldContainer');
 
     if (isAuthRegisterMode) {
         btn.text('Registrarse');
         btn.removeClass('btn-primary').addClass('btn-success');
         link.text('¿Ya tienes cuenta? Inicia Sesión');
         nameField.show();  // Mostrar campo nombre
+        usernameField.show();  // Mostrar campo username
     } else {
         btn.text('Iniciar Sesión');
         btn.removeClass('btn-success').addClass('btn-primary');
         link.text('Registrarse');
         nameField.hide();  // Ocultar campo nombre
+        usernameField.hide();  // Ocultar campo username
+    }
+}
+
+// Verificar disponibilidad de username
+async function checkUsernameAvailability(username) {
+    try {
+        const { data, error } = await supabase
+            .from('people')
+            .select('username')
+            .eq('username', username)
+            .maybeSingle();
+
+        if (error) {
+            console.error('Error checking username:', error);
+            return true; // En caso de error, permitir continuar
+        }
+
+        // Si data es null, el username está disponible
+        return data === null;
+    } catch (e) {
+        console.error('Error:', e);
+        return true; // En caso de error, permitir continuar
     }
 }
 
@@ -396,14 +498,14 @@ function renderGroupsTable() {
 
                 // SCENARIO 2: Creator BUT Paid -> READ ONLY + REOPEN
                 if (isPaid) {
-                    const reopenBtn = `<button class="btn btn-sm btn-warning" title="Reabrir" onclick="toggleGroupStatus(${id}, 'PENDING')"><i class="fas fa-undo"></i></button>`;
+                    const reopenBtn = `<button class="btn btn-sm btn-warning" title="Reabrir" onclick="toggleGroupStatus(${id}, '${row.status}')"><i class="fas fa-undo"></i></button>`;
                     return `${reopenBtn} ${viewBtn}`;
                 }
 
                 // SCENARIO 3: Creator AND Pending -> FULL CONTROL
                 return `
                     <button class="btn btn-sm btn-info text-white" title="Editar" onclick="openGroupModal(${id})"><i class="fas fa-pencil"></i></button>
-                    <button class="btn btn-sm btn-success mx-1" title="Marcar Pagado" onclick="toggleGroupStatus(${id}, 'PAID')"><i class="fas fa-check"></i></button>
+                    <button class="btn btn-sm btn-success mx-1" title="Marcar Pagado" onclick="toggleGroupStatus(${id}, '${row.status}')"><i class="fas fa-check"></i></button>
                     <button class="btn btn-sm btn-danger" title="Eliminar" onclick="deleteGroup(${id})"><i class="fas fa-trash"></i></button>
                     ${viewBtn}
                 `;
@@ -416,13 +518,39 @@ async function toggleGroupStatus(id, currentStatus) {
     const newStatus = currentStatus === 'PENDING' ? 'PAID' : 'PENDING';
     const paidAt = newStatus === 'PAID' ? new Date().toISOString() : null;
 
-    if (confirm(`¿Cambiar estado a ${newStatus}?`)) {
+    const result = await Swal.fire({
+        title: '¿Cambiar estado?',
+        text: `¿Deseas cambiar el estado a ${newStatus}?`,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#0d6efd',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Sí, cambiar',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
         const { error } = await supabase.from('groups')
             .update({ status: newStatus, paid_at: paidAt })
             .eq('id', id);
 
-        if (error) alert('Error actualizando estado');
-        else showView('groups');
+        if (error) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'Error actualizando estado',
+                confirmButtonColor: '#0d6efd'
+            });
+        } else {
+            Swal.fire({
+                icon: 'success',
+                title: '¡Listo!',
+                text: 'Estado actualizado correctamente',
+                confirmButtonColor: '#0d6efd',
+                timer: 1500
+            });
+            showView('groups');
+        }
     }
 }
 
@@ -454,40 +582,82 @@ async function saveGroup() {
     const name = $('#groupName').val().trim();
     const isPublic = $('#groupPublic').is(':checked');
 
-    if (!name) { alert('Nombre requerido'); return; }
+    if (!name) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Nombre requerido',
+            text: 'Por favor ingresa un nombre para el grupo',
+            confirmButtonColor: '#0d6efd'
+        });
+        return;
+    }
 
     const payload = {
         name: name,
         is_public: isPublic
-        // created_by is handled automatically by Supabase for INSERT
-        // owner_id (Legacy Person ID) is ignored for now to simplify
     };
 
     let error = null;
 
     if (editingGroupId) {
-        // Update
         const res = await supabase.from('groups').update(payload).eq('id', editingGroupId);
         error = res.error;
     } else {
-        // Insert
         const res = await supabase.from('groups').insert([payload]);
         error = res.error;
     }
 
     if (error) {
-        alert('Error guardando grupo: ' + error.message);
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'Error guardando grupo: ' + error.message,
+            confirmButtonColor: '#0d6efd'
+        });
     } else {
         bootstrap.Modal.getInstance(document.getElementById('groupModal')).hide();
+        Swal.fire({
+            icon: 'success',
+            title: '¡Listo!',
+            text: 'Grupo guardado correctamente',
+            confirmButtonColor: '#0d6efd',
+            timer: 1500
+        });
         showView('groups');
     }
 }
 
 async function deleteGroup(id) {
-    if (confirm('¿Eliminar grupo permanentemente?')) {
+    const result = await Swal.fire({
+        title: '¿Eliminar grupo?',
+        text: 'Esta acción no se puede deshacer',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
         const { error } = await supabase.from('groups').delete().eq('id', id);
-        if (error) alert('Error eliminando grupo');
-        else showView('groups');
+        if (error) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'Error eliminando grupo',
+                confirmButtonColor: '#0d6efd'
+            });
+        } else {
+            Swal.fire({
+                icon: 'success',
+                title: 'Eliminado',
+                text: 'Grupo eliminado correctamente',
+                confirmButtonColor: '#0d6efd',
+                timer: 1500
+            });
+            showView('groups');
+        }
     }
 }
 
@@ -495,6 +665,7 @@ async function deleteGroup(id) {
 function renderPeopleTable() {
     const data = AppState.people.map(p => ({
         name: p.name,
+        username: p.username || '',  // Username si existe
         hasAccount: !!p.user_id,  // TRUE si tiene cuenta
         id: p.id
     }));
@@ -503,10 +674,17 @@ function renderPeopleTable() {
         {
             data: 'name',
             render: function (data, type, row) {
+                let displayName = data;
+
+                // Mostrar username si existe
+                if (row.username) {
+                    displayName += ` <span class="text-muted small">(@${row.username})</span>`;
+                }
+
                 const badge = row.hasAccount
                     ? '<span class="badge bg-success ms-2"><i class="fas fa-user-check"></i> Con Cuenta</span>'
                     : '<span class="badge bg-secondary ms-2"><i class="fas fa-user"></i> Invitado</span>';
-                return data + badge;
+                return displayName + badge;
             }
         },
         {
@@ -522,20 +700,58 @@ async function addGlobalPerson() {
     const name = $('#globalPersonName').val().trim();
     if (name) {
         const { error } = await supabase.from('people').insert([{ name }]);
-        if (error) alert('Error agregando persona: ' + error.message);
-        else {
+        if (error) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'Error agregando persona: ' + error.message,
+                confirmButtonColor: '#0d6efd'
+            });
+        } else {
             $('#globalPersonName').val('');
             showView('people'); // Refresh
-            alert('Persona agregada');
+            Swal.fire({
+                icon: 'success',
+                title: '¡Listo!',
+                text: 'Persona agregada correctamente',
+                confirmButtonColor: '#0d6efd',
+                timer: 1500
+            });
         }
     }
 }
 
 async function deleteGlobalPerson(id) {
-    if (confirm('¿Eliminar del directorio global?')) {
+    const result = await Swal.fire({
+        title: '¿Eliminar persona?',
+        text: 'Esta persona será removida del directorio global',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
         const { error } = await supabase.from('people').delete().eq('id', id);
-        if (error) alert('Error: Puede que esté en un grupo. Elimínala de los grupos primero.');
-        else showView('people');
+        if (error) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'Puede que esté en un grupo. Elimínala de los grupos primero.',
+                confirmButtonColor: '#0d6efd'
+            });
+        } else {
+            Swal.fire({
+                icon: 'success',
+                title: 'Eliminada',
+                text: 'Persona eliminada correctamente',
+                confirmButtonColor: '#0d6efd',
+                timer: 1500
+            });
+            showView('people');
+        }
     }
 }
 
@@ -614,20 +830,61 @@ async function addMemberToGroup() {
         .from('group_members')
         .insert([{ group_id: currentGroupId, person_id: pid }]);
 
-    if (error) alert('Error añadiendo miembro');
-    else await openGroupDetail(currentGroupId);
+    if (error) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: 'Error añadiendo miembro',
+            confirmButtonColor: '#0d6efd'
+        });
+    } else {
+        Swal.fire({
+            icon: 'success',
+            title: '¡Listo!',
+            text: 'Miembro añadido correctamente',
+            confirmButtonColor: '#0d6efd',
+            timer: 1500
+        });
+        await openGroupDetail(currentGroupId);
+    }
 }
 
 async function removeMember(mid) {
-    if (confirm('¿Quitar del grupo?')) {
+    const result = await Swal.fire({
+        title: '¿Quitar del grupo?',
+        text: 'Esta persona será removida del grupo',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Sí, quitar',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
         const { error } = await supabase
             .from('group_members')
             .delete()
             .eq('group_id', currentGroupId)
             .eq('person_id', mid);
 
-        if (error) alert('Error quitando miembro');
-        else await openGroupDetail(currentGroupId);
+        if (error) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'Error quitando miembro',
+                confirmButtonColor: '#0d6efd'
+            });
+        } else {
+            Swal.fire({
+                icon: 'success',
+                title: '¡Listo!',
+                text: 'Miembro removido correctamente',
+                confirmButtonColor: '#0d6efd',
+                timer: 1500
+            });
+            await openGroupDetail(currentGroupId);
+        }
     }
 }
 
@@ -758,7 +1015,13 @@ let editExpId = null;
 function openExpenseModal() {
     const group = AppState.groups.find(g => g.id == currentGroupId);
     if ((group.memberIds || []).length === 0) {
-        alert('Agrega integrantes primero'); return;
+        Swal.fire({
+            icon: 'warning',
+            title: 'Sin integrantes',
+            text: 'Agrega integrantes primero',
+            confirmButtonColor: '#0d6efd'
+        });
+        return;
     }
 
     editExpId = null; // Reset for new
@@ -855,7 +1118,15 @@ async function saveExpense() {
         }
     }
 
-    if (!desc || !amount || !payer) { alert('Datos incompletos'); return; }
+    if (!desc || !amount || !payer) {
+        Swal.fire({
+            icon: 'warning',
+            title: 'Datos incompletos',
+            text: 'Por favor completa todos los campos',
+            confirmButtonColor: '#0d6efd'
+        });
+        return;
+    }
 
     const expensePayload = {
         group_id: currentGroupId,
@@ -900,7 +1171,15 @@ async function saveExpense() {
     if (type === 'SHARED') {
         const inv = [];
         $('.split-check:checked').each(function () { inv.push($(this).val()); });
-        if (inv.length === 0) { alert('Selecciona participantes'); return; }
+        if (inv.length === 0) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Sin participantes',
+                text: 'Selecciona al menos un participante',
+                confirmButtonColor: '#0d6efd'
+            });
+            return;
+        }
 
         const invPayload = inv.map(pid => ({ expense_id: savedId, person_id: pid }));
         const { error: errInv } = await supabase.from('expense_involved').insert(invPayload);
@@ -927,13 +1206,37 @@ async function deleteExpense(id) {
         }
     }
 
-    if (confirm('¿Borrar?')) {
+    const result = await Swal.fire({
+        title: '¿Eliminar gasto?',
+        text: 'Esta acción no se puede deshacer',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#dc3545',
+        cancelButtonColor: '#6c757d',
+        confirmButtonText: 'Sí, eliminar',
+        cancelButtonText: 'Cancelar'
+    });
+
+    if (result.isConfirmed) {
         const { error } = await supabase.from('expenses').delete().eq('id', id);
-        if (error) alert('Error borrando');
-        else {
+        if (error) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Error',
+                text: 'Error borrando gasto',
+                confirmButtonColor: '#0d6efd'
+            });
+        } else {
             if (bootstrap.Modal.getInstance(document.getElementById('expenseModal'))) {
                 bootstrap.Modal.getInstance(document.getElementById('expenseModal')).hide();
             }
+            Swal.fire({
+                icon: 'success',
+                title: 'Eliminado',
+                text: 'Gasto eliminado correctamente',
+                confirmButtonColor: '#0d6efd',
+                timer: 1500
+            });
             await openGroupDetail(currentGroupId);
         }
     }

@@ -81,6 +81,13 @@
                                     <label class="form-label">Nombre Completo</label>
                                     <input type="text" class="form-control" id="authName" placeholder="Ej. Juan Pérez">
                                 </div>
+                                <div class="mb-3" id="usernameFieldContainer" style="display: none;">
+                                    <label class="form-label">Nombre de Usuario</label>
+                                    <input type="text" class="form-control" id="authUsername"
+                                        placeholder="Ej. juanperez" autocomplete="username">
+                                    <small class="form-text text-muted">Este nombre de usuario se usará como integrante
+                                        en grupos.</small>
+                                </div>
                                 <div class="mb-3">
                                     <label class="form-label">Correo Electrónico</label>
                                     <input type="email" class="form-control" id="authEmail" required>
@@ -447,6 +454,9 @@
     <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap5.min.js"></script>
     <script src="https://cdn.datatables.net/responsive/2.4.1/js/dataTables.responsive.min.js"></script>
     <script src="https://cdn.datatables.net/responsive/2.4.1/js/responsive.bootstrap5.min.js"></script>
+
+    <!-- SweetAlert2 for modern notifications -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <!-- Supabase SDK -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
